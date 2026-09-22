@@ -1,4 +1,6 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'mysynk_api.dart';
+import 'files_page.dart';
 
 void main() {
   runApp(const MySynkApp());
@@ -51,9 +53,7 @@ class _MySynkHomePageState extends State<MySynkHomePage> {
           ),
         ),
       ),
-
       body: _buildCurrentPage(),
-
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
@@ -86,13 +86,10 @@ class _MySynkHomePageState extends State<MySynkHomePage> {
     switch (_selectedIndex) {
       case 0:
         return const _SpacePage();
-
       case 1:
         return const _SyncPage();
-
       case 2:
         return const _SettingsPage();
-
       default:
         return const _SpacePage();
     }
@@ -130,19 +127,22 @@ class _SpacePage extends StatelessWidget {
             ),
           ),
         ),
-
         const SizedBox(height: 20),
-
         Card(
           child: ListTile(
             leading: const Icon(Icons.folder),
             title: const Text('Mis archivos'),
             subtitle: const Text('Explorar los archivos del servidor'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () {},
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const FilesPage(),
+                ),
+              );
+            },
           ),
         ),
-
         Card(
           child: ListTile(
             leading: const Icon(Icons.backup_outlined),
@@ -185,25 +185,87 @@ class _SyncPage extends StatelessWidget {
   }
 }
 
-class _SettingsPage extends StatelessWidget {
+class _SettingsPage extends StatefulWidget {
   const _SettingsPage();
+
+  @override
+  State<_SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<_SettingsPage> {
+  bool _testingConnection = false;
+  String _connectionStatus = 'Todavía no conectado';
+
+  Future<void> _testConnection() async {
+    setState(() {
+      _testingConnection = true;
+      _connectionStatus = 'Comprobando conexión...';
+    });
+
+    final api = MySynkApi(
+      baseUrl: 'http://192.168.101.104:3000',
+    );
+
+    try {
+      final connected = await api.testConnection();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _testingConnection = false;
+        _connectionStatus = connected
+            ? 'Servidor conectado'
+            : 'La API respondió con un formato inesperado';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _testingConnection = false;
+        _connectionStatus = 'No se pudo conectar al servidor';
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.all(20),
-      children: const [
+      children: [
         ListTile(
-          leading: Icon(Icons.dns_outlined),
-          title: Text('Servidor'),
-          subtitle: Text('Todavía no conectado'),
+          leading: const Icon(Icons.dns_outlined),
+          title: const Text('Servidor'),
+          subtitle: Text(_connectionStatus),
         ),
-        ListTile(
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: _testingConnection ? null : _testConnection,
+          icon: _testingConnection
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                  ),
+                )
+              : const Icon(Icons.wifi_find),
+          label: Text(
+            _testingConnection
+                ? 'Comprobando...'
+                : 'Probar conexión',
+          ),
+        ),
+        const SizedBox(height: 20),
+        const ListTile(
           leading: Icon(Icons.phone_android_outlined),
           title: Text('Este dispositivo'),
           subtitle: Text('Identidad del dispositivo pendiente'),
         ),
-        ListTile(
+        const ListTile(
           leading: Icon(Icons.info_outline),
           title: Text('Acerca de MySynk'),
           subtitle: Text('Cliente Flutter de MySynk'),
