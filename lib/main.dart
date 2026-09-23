@@ -1,5 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'mysynk_api.dart';
+import 'server_config.dart';
 import 'files_page.dart';
 
 void main() {
@@ -202,11 +203,13 @@ class _SettingsPageState extends State<_SettingsPage> {
       _connectionStatus = 'Comprobando conexión...';
     });
 
-    final api = MySynkApi(
-      baseUrl: 'http://192.168.101.104:3000',
-    );
-
     try {
+      final serverUrl = await ServerConfig.getServerUrl();
+
+      final api = MySynkApi(
+        baseUrl: serverUrl,
+      );
+
       final connected = await api.testConnection();
 
       if (!mounted) {

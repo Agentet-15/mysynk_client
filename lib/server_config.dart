@@ -1,10 +1,10 @@
-﻿import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ServerConfig {
   static const String _serverUrlKey = 'mysynk_server_url';
 
   static const String defaultServerUrl =
-      'http://192.168.101.104:3000';
+      'http://100.91.142.14:3000';
 
   static Future<String> getServerUrl() async {
     final preferences = await SharedPreferences.getInstance();

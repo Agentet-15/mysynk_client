@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'mysynk_api.dart';
+import 'server_config.dart';
 
 class FilesPage extends StatefulWidget {
   const FilesPage({super.key});
@@ -10,9 +11,7 @@ class FilesPage extends StatefulWidget {
 }
 
 class _FilesPageState extends State<FilesPage> {
-  final MySynkApi _api = MySynkApi(
-    baseUrl: 'http://192.168.101.104:3000',
-  );
+  MySynkApi? _api;
 
   List<Map<String, dynamic>> _items = [];
   bool _loading = true;
@@ -33,7 +32,13 @@ class _FilesPageState extends State<FilesPage> {
     });
 
     try {
-      final items = await _api.listFiles(_currentPath);
+      final serverUrl = await ServerConfig.getServerUrl();
+
+      _api = MySynkApi(
+        baseUrl: serverUrl,
+      );
+
+      final items = await _api!.listFiles(_currentPath);
 
       if (!mounted) {
         return;
@@ -63,7 +68,7 @@ class _FilesPageState extends State<FilesPage> {
     });
 
     try {
-      final items = await _api.listFiles(path);
+      final items = await _api!.listFiles(path);
 
       if (!mounted) {
         return;
