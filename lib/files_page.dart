@@ -190,6 +190,12 @@ class _FilesPageState extends State<FilesPage> {
     return '$serverUrl/api/v1/preview?path=${Uri.encodeComponent(path)}';
   }
 
+  String _thumbnailUrl(String path) {
+    final serverUrl = _api?.baseUrl ?? '';
+
+    return '$serverUrl/api/v1/thumbnail?path=${Uri.encodeComponent(path)}';
+  }
+
   void _openPreview(Map<String, dynamic> item) {
     final previewItems = _items.where((candidate) {
       final type = candidate['type']?.toString() ?? 'file';
@@ -511,38 +517,8 @@ class _FilesPageState extends State<FilesPage> {
     String path,
     String name,
   ) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Image.network(
-          _previewUrl(path),
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return const Center(
-              child: Icon(
-                Icons.video_file_outlined,
-                size: 64,
-              ),
-            );
-          },
-        ),
-        const Center(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.black54,
-            ),
-            child: Padding(
-              padding: EdgeInsets.all(14),
-              child: Icon(
-                Icons.play_arrow,
-                color: Colors.white,
-                size: 32,
-              ),
-            ),
-          ),
-        ),
-      ],
+    return _VideoThumbnail(
+      url: _thumbnailUrl(path),
     );
   }
 }
@@ -743,6 +719,41 @@ class _PreviewNavigationButton extends StatelessWidget {
     );
   }
 }
+
+
+class _VideoThumbnail extends StatelessWidget {
+  const _VideoThumbnail({
+    required this.url,
+  });
+
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    return Image.network(
+      url,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) {
+        return const Center(
+          child: Icon(
+            Icons.video_file_outlined,
+            color: Colors.white70,
+          ),
+        );
+      },
+      loadingBuilder: (context, child, loadingProgress) {
+        if (loadingProgress == null) {
+          return child;
+        }
+
+        return const Center(
+          child: CircularProgressIndicator(),
+        );
+      },
+    );
+  }
+}
+
 
 class _VideoPreview extends StatefulWidget {
   const _VideoPreview({
