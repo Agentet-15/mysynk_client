@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import 'pairing_parser.dart';
+
 class PairingPage extends StatefulWidget {
   const PairingPage({super.key});
 
@@ -23,6 +25,12 @@ class _PairingPageState extends State<PairingPage> {
       final value = barcode.rawValue?.trim();
 
       if (value == null || value.isEmpty) {
+        continue;
+      }
+
+      final pairing = PairingQrParser.parse(value);
+
+      if (pairing == null) {
         continue;
       }
 
@@ -66,7 +74,7 @@ class _PairingPageState extends State<PairingPage> {
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.all(
+                      borderRadius: const BorderRadius.all(
                         Radius.circular(20),
                       ),
                       child: MobileScanner(
