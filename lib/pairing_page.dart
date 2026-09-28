@@ -13,7 +13,7 @@ class PairingPage extends StatefulWidget {
 class _PairingPageState extends State<PairingPage> {
   final MobileScannerController _controller = MobileScannerController();
 
-  String? _scannedValue;
+  PairingQrData? _pairing;
   bool _handledScan = false;
 
   void _handleBarcode(BarcodeCapture capture) {
@@ -35,7 +35,7 @@ class _PairingPageState extends State<PairingPage> {
       }
 
       setState(() {
-        _scannedValue = value;
+        _pairing = pairing;
         _handledScan = true;
       });
 
@@ -46,7 +46,7 @@ class _PairingPageState extends State<PairingPage> {
 
   void _scanAgain() {
     setState(() {
-      _scannedValue = null;
+      _pairing = null;
       _handledScan = false;
     });
 
@@ -61,13 +61,13 @@ class _PairingPageState extends State<PairingPage> {
 
   @override
   Widget build(BuildContext context) {
-    final scannedValue = _scannedValue;
+    final pairing = _pairing;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Emparejar servidor'),
       ),
-      body: scannedValue == null
+      body: pairing == null
           ? Column(
               children: [
                 Expanded(
@@ -99,19 +99,28 @@ class _PairingPageState extends State<PairingPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Icon(
-                    Icons.qr_code_2,
+                    Icons.verified_rounded,
                     size: 64,
                   ),
                   const SizedBox(height: 20),
                   const Text(
-                    'Código QR detectado',
+                    'QR de MySynk reconocido',
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w600,
                     ),
+                    textAlign: TextAlign.center,
                   ),
-                  const SizedBox(height: 12),
-                  SelectableText(scannedValue),
+                  const SizedBox(height: 28),
+                  _PairingInfoRow(
+                    label: 'Servidor',
+                    value: pairing.server,
+                  ),
+                  const SizedBox(height: 16),
+                  _PairingInfoRow(
+                    label: 'Expira',
+                    value: pairing.expires.toLocal().toString(),
+                  ),
                   const Spacer(),
                   FilledButton.icon(
                     onPressed: _scanAgain,
@@ -121,6 +130,34 @@ class _PairingPageState extends State<PairingPage> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+class _PairingInfoRow extends StatelessWidget {
+  const _PairingInfoRow({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
+        const SizedBox(height: 4),
+        SelectableText(
+          value,
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
+      ],
     );
   }
 }
