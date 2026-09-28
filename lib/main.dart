@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'mysynk_api.dart';
 import 'server_config.dart';
 import 'files_page.dart';
@@ -7,14 +8,68 @@ void main() {
   runApp(const MySynkApp());
 }
 
-class MySynkApp extends StatelessWidget {
+class MySynkApp extends StatefulWidget {
   const MySynkApp({super.key});
+
+  @override
+  State<MySynkApp> createState() => _MySynkAppState();
+}
+
+class _MySynkAppState extends State<MySynkApp> {
+  static const _themePreferenceKey = 'theme_mode';
+
+  ThemeMode _themeMode = ThemeMode.system;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThemeMode();
+  }
+
+  Future<void> _loadThemeMode() async {
+    final preferences = await SharedPreferences.getInstance();
+    final value = preferences.getString(_themePreferenceKey);
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _themeMode = switch (value) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      };
+    });
+  }
+
+  Future<void> _setThemeMode(ThemeMode mode) async {
+    final preferences = await SharedPreferences.getInstance();
+
+    await preferences.setString(
+      _themePreferenceKey,
+      switch (mode) {
+        ThemeMode.light => 'light',
+        ThemeMode.dark => 'dark',
+        ThemeMode.system => 'system',
+      },
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _themeMode = mode;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'MySynk',
       debugShowCheckedModeBanner: false,
+      themeMode: _themeMode,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
@@ -22,13 +77,30 @@ class MySynkApp extends StatelessWidget {
           brightness: Brightness.light,
         ),
       ),
-      home: const MySynkHomePage(),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.blue,
+          brightness: Brightness.dark,
+        ),
+      ),
+      home: MySynkHomePage(
+        themeMode: _themeMode,
+        onThemeChanged: _setThemeMode,
+      ),
     );
   }
 }
 
 class MySynkHomePage extends StatefulWidget {
-  const MySynkHomePage({super.key});
+  const MySynkHomePage({
+    super.key,
+    required this.themeMode,
+    required this.onThemeChanged,
+  });
+
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeChanged;
 
   @override
   State<MySynkHomePage> createState() => _MySynkHomePageState();
@@ -90,7 +162,10 @@ class _MySynkHomePageState extends State<MySynkHomePage> {
       case 1:
         return const _SyncPage();
       case 2:
-        return const _SettingsPage();
+        return _SettingsPage(
+          themeMode: widget.themeMode,
+          onThemeChanged: widget.onThemeChanged,
+        );
       default:
         return const _SpacePage();
     }
@@ -187,7 +262,13 @@ class _SyncPage extends StatelessWidget {
 }
 
 class _SettingsPage extends StatefulWidget {
-  const _SettingsPage();
+  const _SettingsPage({
+    required this.themeMode,
+    required this.onThemeChanged,
+  });
+
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeChanged;
 
   @override
   State<_SettingsPage> createState() => _SettingsPageState();
@@ -260,6 +341,53 @@ class _SettingsPageState extends State<_SettingsPage> {
             _testingConnection
                 ? 'Comprobando...'
                 : 'Probar conexión',
+          ),
+        ),
+        const SizedBox(height: 20),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 8,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.brightness_6_outlined),
+                  title: Text('Tema'),
+                  subtitle: Text('Elige cómo quieres ver MySynk'),
+                ),
+                RadioGroup<ThemeMode>(
+                  groupValue: widget.themeMode,
+                  onChanged: (value) {
+                    if (value != null) {
+                      widget.onThemeChanged(value);
+                    }
+                  },
+                  child: Column(
+                    children: [
+                      RadioListTile<ThemeMode>(
+                        value: ThemeMode.system,
+                        title: const Text('Sistema'),
+                        subtitle: const Text(
+                          'Usar la configuración del dispositivo',
+                        ),
+                      ),
+                      RadioListTile<ThemeMode>(
+                        value: ThemeMode.light,
+                        title: const Text('Claro'),
+                      ),
+                      RadioListTile<ThemeMode>(
+                        value: ThemeMode.dark,
+                        title: const Text('Oscuro'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 20),
