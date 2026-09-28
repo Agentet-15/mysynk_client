@@ -457,9 +457,11 @@ class _FilesPageState extends State<FilesPage> {
                       },
                     )
                   else if (isVideo)
-                    _buildVideoThumbnail(
-                      path,
-                      name,
+                    Positioned.fill(
+                      child: _buildVideoThumbnail(
+                        path,
+                        name,
+                      ),
                     )
                   else
                     _buildGridFileIcon(
@@ -773,65 +775,116 @@ class _VideoPreview extends StatefulWidget {
 }
 
 class _VideoPreviewState extends State<_VideoPreview> {
-  late final VideoPlayerController _controller;
+  VideoPlayerController? _controller;
   String? _error;
+  bool _initializing = true;
 
   @override
   void initState() {
     super.initState();
-
-    _controller = VideoPlayerController.networkUrl(
-      Uri.parse(widget.url),
-    );
-
-    _initialize();
+    _initialize(widget.url);
   }
 
-  Future<void> _initialize() async {
+  @override
+  void didUpdateWidget(covariant _VideoPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.url != widget.url) {
+      _initialize(widget.url);
+    }
+  }
+
+  Future<void> _initialize(String url) async {
+    final previousController = _controller;
+
+    setState(() {
+      _controller = null;
+      _error = null;
+      _initializing = true;
+    });
+
+    await previousController?.dispose();
+
+    final controller = VideoPlayerController.networkUrl(
+      Uri.parse(url),
+    );
+
     try {
-      await _controller.initialize();
+      await controller.initialize();
 
       if (!mounted) {
+        await controller.dispose();
         return;
       }
 
+      _controller = controller;
+      _initializing = false;
+
       setState(() {});
-      await _controller.play();
+
+      await controller.play();
     } catch (error) {
+      await controller.dispose();
+
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _error = error.toString();
+        _error = _friendlyVideoError(error);
+        _initializing = false;
       });
+    }
+  }
+
+  String _friendlyVideoError(Object error) {
+    final message = error.toString();
+
+    if (message.contains('Source error') ||
+        message.contains('ExoPlaybackException')) {
+      return 'El servidor no pudo entregar este video para reproducción.';
+    }
+
+    if (message.contains('HTTP')) {
+      return 'No se pudo descargar el video desde el servidor.';
+    }
+
+    return 'No se pudo reproducir este video.';
+  }
+
+  Future<void> _togglePlayback() async {
+    final controller = _controller;
+
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
+
+    if (controller.value.isPlaying) {
+      await controller.pause();
+    } else {
+      if (controller.value.position >= controller.value.duration) {
+        await controller.seekTo(Duration.zero);
+      }
+
+      await controller.play();
+    }
+
+    if (mounted) {
+      setState(() {});
     }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    final controller = _controller;
+    _controller = null;
+    controller?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            'No se pudo reproducir el video.\n\n$_error',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white,
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (!_controller.value.isInitialized) {
+    if (_initializing) {
       return const Center(
         child: CircularProgressIndicator(
           color: Colors.white,
@@ -839,24 +892,64 @@ class _VideoPreviewState extends State<_VideoPreview> {
       );
     }
 
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.error_outline,
+                color: Colors.white70,
+                size: 48,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () => _initialize(widget.url),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Reintentar'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final controller = _controller;
+
+    if (controller == null || !controller.value.isInitialized) {
+      return const Center(
+        child: Text(
+          'Video no disponible.',
+          style: TextStyle(color: Colors.white),
+        ),
+      );
+    }
+
+    final aspectRatio =
+        controller.value.aspectRatio > 0
+            ? controller.value.aspectRatio
+            : 16 / 9;
+
     return Center(
       child: GestureDetector(
-        onTap: () {
-          if (_controller.value.isPlaying) {
-            _controller.pause();
-          } else {
-            _controller.play();
-          }
-
-          setState(() {});
-        },
+        onTap: _togglePlayback,
         child: AspectRatio(
-          aspectRatio: _controller.value.aspectRatio,
+          aspectRatio: aspectRatio,
           child: Stack(
             alignment: Alignment.center,
             children: [
-              VideoPlayer(_controller),
-              if (!_controller.value.isPlaying)
+              VideoPlayer(controller),
+              if (!controller.value.isPlaying)
                 const DecoratedBox(
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
