@@ -3,14 +3,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ServerConfig {
   static const String _serverUrlKey = 'mysynk_server_url';
 
-  static const String defaultServerUrl =
-      'http://100.91.142.14:3000';
-
-  static Future<String> getServerUrl() async {
+  static Future<String?> getServerUrl() async {
     final preferences = await SharedPreferences.getInstance();
 
-    return preferences.getString(_serverUrlKey) ??
-        defaultServerUrl;
+    return preferences.getString(_serverUrlKey);
   }
 
   static Future<void> setServerUrl(String url) async {
@@ -20,5 +16,11 @@ class ServerConfig {
       _serverUrlKey,
       url.trim().replaceFirst(RegExp(r'/$'), ''),
     );
+  }
+
+  static Future<void> clearServerUrl() async {
+    final preferences = await SharedPreferences.getInstance();
+
+    await preferences.remove(_serverUrlKey);
   }
 }

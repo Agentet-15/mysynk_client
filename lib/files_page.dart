@@ -37,6 +37,18 @@ class _FilesPageState extends State<FilesPage> {
     try {
       final serverUrl = await ServerConfig.getServerUrl();
 
+      if (serverUrl == null || serverUrl.isEmpty) {
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _loading = false;
+          _error = 'No hay un servidor conectado.';
+        });
+        return;
+      }
+
       _api = MySynkApi(
         baseUrl: serverUrl,
       );

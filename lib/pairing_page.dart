@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import 'mysynk_api.dart';
 import 'pairing_parser.dart';
+import 'server_config.dart';
 
 class PairingPage extends StatefulWidget {
   const PairingPage({super.key});
@@ -11,13 +13,17 @@ class PairingPage extends StatefulWidget {
 }
 
 class _PairingPageState extends State<PairingPage> {
-  final MobileScannerController _controller = MobileScannerController();
+  final MobileScannerController _controller = MobileScannerController(
+    formats: const [BarcodeFormat.qrCode],
+  );
 
   PairingQrData? _pairing;
   bool _handledScan = false;
+  bool _connecting = false;
+  String? _error;
 
   void _handleBarcode(BarcodeCapture capture) {
-    if (_handledScan) {
+    if (_handledScan || _connecting) {
       return;
     }
 
@@ -37,6 +43,7 @@ class _PairingPageState extends State<PairingPage> {
       setState(() {
         _pairing = pairing;
         _handledScan = true;
+        _error = null;
       });
 
       _controller.stop();
@@ -44,10 +51,53 @@ class _PairingPageState extends State<PairingPage> {
     }
   }
 
+  Future<void> _connect() async {
+    final pairing = _pairing;
+
+    if (pairing == null || _connecting) {
+      return;
+    }
+
+    setState(() {
+      _connecting = true;
+      _error = null;
+    });
+
+    try {
+      final api = MySynkApi(
+        baseUrl: pairing.url,
+      );
+
+      await api.authorizePairing(
+        token: pairing.pairing,
+        name: 'Mi dispositivo Android',
+        type: 'android',
+      );
+
+      await ServerConfig.setServerUrl(pairing.url);
+
+      if (!mounted) {
+        return;
+      }
+
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _connecting = false;
+        _error = error.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
   void _scanAgain() {
     setState(() {
       _pairing = null;
       _handledScan = false;
+      _error = null;
     });
 
     _controller.start();
@@ -65,7 +115,7 @@ class _PairingPageState extends State<PairingPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Emparejar servidor'),
+        title: const Text('Conectar servidor'),
       ),
       body: pairing == null
           ? Column(
@@ -99,12 +149,12 @@ class _PairingPageState extends State<PairingPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Icon(
-                    Icons.verified_rounded,
+                    Icons.cloud_done_rounded,
                     size: 64,
                   ),
                   const SizedBox(height: 20),
                   const Text(
-                    'QR de MySynk reconocido',
+                    'Servidor MySynk encontrado',
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w600,
@@ -118,12 +168,43 @@ class _PairingPageState extends State<PairingPage> {
                   ),
                   const SizedBox(height: 16),
                   _PairingInfoRow(
+                    label: 'Dirección',
+                    value: pairing.url,
+                  ),
+                  const SizedBox(height: 16),
+                  _PairingInfoRow(
                     label: 'Expira',
                     value: pairing.expires.toLocal().toString(),
                   ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 20),
+                    Text(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                   const Spacer(),
                   FilledButton.icon(
-                    onPressed: _scanAgain,
+                    onPressed: _connecting ? null : _connect,
+                    icon: _connecting
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(Icons.link),
+                    label: Text(
+                      _connecting ? 'Conectando...' : 'Conectar',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _connecting ? null : _scanAgain,
                     icon: const Icon(Icons.qr_code_scanner),
                     label: const Text('Escanear de nuevo'),
                   ),

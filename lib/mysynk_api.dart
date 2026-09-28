@@ -55,6 +55,38 @@ class MySynkApi {
         .toList();
   }
 
+  Future<Map<String, dynamic>> authorizePairing({
+    required String token,
+    required String name,
+    required String type,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/pairing/authorize');
+
+    final response = await http.post(
+      uri,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'token': token,
+        'name': name,
+        'type': type,
+      }),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('No se pudo autorizar el dispositivo');
+    }
+
+    final data = jsonDecode(response.body);
+
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Respuesta inválida del servidor');
+    }
+
+    return data;
+  }
+
   Future<List<Map<String, dynamic>>> listDevices() async {
     final uri = Uri.parse('$baseUrl/api/v1/devices');
 

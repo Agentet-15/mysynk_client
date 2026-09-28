@@ -173,11 +173,70 @@ class _MySynkHomePageState extends State<MySynkHomePage> {
   }
 }
 
-class _SpacePage extends StatelessWidget {
+class _SpacePage extends StatefulWidget {
   const _SpacePage();
 
   @override
+  State<_SpacePage> createState() => _SpacePageState();
+}
+
+class _SpacePageState extends State<_SpacePage> {
+  String? _serverUrl;
+  bool _loading = true;
+
+  bool get _connected => _serverUrl != null && _serverUrl!.isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadServer();
+  }
+
+  Future<void> _loadServer() async {
+    final serverUrl = await ServerConfig.getServerUrl();
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _serverUrl = serverUrl;
+      _loading = false;
+    });
+  }
+
+  Future<void> _connectServer() async {
+    final connected = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (context) => const PairingPage(),
+      ),
+    );
+
+    if (connected == true) {
+      await _loadServer();
+    }
+  }
+
+  void _openFiles() {
+    if (!_connected) {
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const FilesPage(),
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -206,25 +265,72 @@ class _SpacePage extends StatelessWidget {
         ),
         const SizedBox(height: 20),
         Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      _connected
+                          ? Icons.cloud_done_rounded
+                          : Icons.cloud_off_rounded,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _connected
+                            ? 'Servidor conectado'
+                            : 'Servidor no conectado',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _connected
+                      ? _serverUrl!
+                      : 'Conecta MySynk a tu servidor para acceder a tus archivos.',
+                ),
+                if (!_connected) ...[
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _connectServer,
+                      icon: const Icon(Icons.link),
+                      label: const Text('Conectar servidor'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
           child: ListTile(
+            enabled: _connected,
             leading: const Icon(Icons.folder),
             title: const Text('Mis archivos'),
-            subtitle: const Text('Explorar los archivos del servidor'),
+            subtitle: Text(
+              _connected
+                  ? 'Explorar los archivos del servidor'
+                  : 'Conecta un servidor para acceder a tus archivos',
+            ),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) => const FilesPage(),
-                ),
-              );
-            },
+            onTap: _openFiles,
           ),
         ),
         Card(
           child: ListTile(
             leading: const Icon(Icons.backup_outlined),
             title: const Text('Copias de seguridad'),
-            subtitle: const Text('Gestionar las copias de este dispositivo'),
+            subtitle: const Text(
+              'Gestionar las copias de este dispositivo',
+            ),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {},
           ),
@@ -287,6 +393,18 @@ class _SettingsPageState extends State<_SettingsPage> {
 
     try {
       final serverUrl = await ServerConfig.getServerUrl();
+
+      if (serverUrl == null || serverUrl.isEmpty) {
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _testingConnection = false;
+          _connectionStatus = 'No hay un servidor conectado.';
+        });
+        return;
+      }
 
       final api = MySynkApi(
         baseUrl: serverUrl,
