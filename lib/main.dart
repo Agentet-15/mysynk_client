@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'mysynk_api.dart';
 import 'server_config.dart';
 import 'files_page.dart';
+import 'pairing_page.dart';
 
 void main() {
   runApp(const MySynkApp());
@@ -342,6 +343,18 @@ class _SettingsPageState extends State<_SettingsPage> {
                 ? 'Comprobando...'
                 : 'Probar conexión',
           ),
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const PairingPage(),
+              ),
+            );
+          },
+          icon: const Icon(Icons.qr_code_scanner),
+          label: const Text('Emparejar servidor'),
         ),
         const SizedBox(height: 20),
         Card(
