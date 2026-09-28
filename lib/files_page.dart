@@ -377,13 +377,19 @@ class _FilesPageState extends State<FilesPage> {
                         },
                       ),
                     )
-                  : Icon(
-                      isDirectory
-                          ? Icons.folder_outlined
-                          : isVideo
-                              ? Icons.video_file_outlined
+                  : isVideo
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: _buildVideoThumbnail(
+                            path,
+                            name,
+                          ),
+                        )
+                      : Icon(
+                          isDirectory
+                              ? Icons.folder_outlined
                               : _fileIcon(name),
-                    ),
+                        ),
             ),
             title: Text(
               name,
