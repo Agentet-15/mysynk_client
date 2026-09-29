@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_identity.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'mysynk_api.dart';
 import 'server_config.dart';
@@ -68,7 +69,7 @@ class _MySynkAppState extends State<MySynkApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'MySynk',
+      title: AppIdentity.name,
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
       theme: ThemeData(
