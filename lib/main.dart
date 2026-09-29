@@ -75,14 +75,14 @@ class _MySynkAppState extends State<MySynkApp> {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
+          seedColor: AppIdentity.brandColor,
           brightness: Brightness.light,
         ),
       ),
       darkTheme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
+          seedColor: AppIdentity.brandColor,
           brightness: Brightness.dark,
         ),
       ),
