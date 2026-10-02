@@ -59,6 +59,7 @@ class MySynkApi {
     required String token,
     required String name,
     required String type,
+    String? platformIdentifier,
   }) async {
     final uri = Uri.parse('$baseUrl/api/v1/pairing/authorize');
 
@@ -71,6 +72,9 @@ class MySynkApi {
         'token': token,
         'name': name,
         'type': type,
+        if (platformIdentifier != null &&
+            platformIdentifier.trim().isNotEmpty)
+          'platformIdentifier': platformIdentifier.trim(),
       }),
     );
 
