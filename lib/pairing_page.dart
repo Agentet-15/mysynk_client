@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import 'device_identity.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'mysynk_api.dart';
@@ -64,6 +66,10 @@ class _PairingPageState extends State<PairingPage> {
     });
 
     try {
+      debugPrint('MYSYNK: iniciando conexión...');
+      final androidId = await DeviceIdentity.getAndroidId();
+      debugPrint('MYSYNK: ANDROID_ID obtenido');
+
       final api = MySynkApi(
         baseUrl: pairing.url,
       );
@@ -72,7 +78,10 @@ class _PairingPageState extends State<PairingPage> {
         token: pairing.pairing,
         name: 'Mi dispositivo Android',
         type: 'android',
+        platformIdentifier: androidId,
       );
+
+      debugPrint('MYSYNK: pairing enviado al servidor');
 
       await ServerConfig.setServerUrl(pairing.url);
 
