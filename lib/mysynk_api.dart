@@ -91,6 +91,78 @@ class MySynkApi {
     return data;
   }
 
+
+  Future<List<Map<String, dynamic>>> listSyncPairs() async {
+    final uri = Uri.parse('$baseUrl/api/v1/sync');
+
+    final response = await http.get(uri);
+
+    if (response.statusCode != 200) {
+      throw Exception('Error al consultar las sincronizaciones');
+    }
+
+    final data = jsonDecode(response.body);
+
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Respuesta inválida del servidor');
+    }
+
+    final pairs = data['pairs'];
+
+    if (pairs is! List) {
+      throw Exception(
+        'La respuesta no contiene una lista de sincronizaciones',
+      );
+    }
+
+    return pairs
+        .whereType<Map>()
+        .map((pair) => Map<String, dynamic>.from(pair))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> createSyncPair({
+    required String deviceId,
+    required String localPath,
+    required String devicePath,
+    String mode = 'ONE_WAY_UPLOAD',
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/sync');
+
+    final response = await http.post(
+      uri,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'deviceId': deviceId,
+        'localPath': localPath,
+        'devicePath': devicePath,
+        'mode': mode,
+      }),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('No se pudo crear la sincronización');
+    }
+
+    final data = jsonDecode(response.body);
+
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Respuesta inválida del servidor');
+    }
+
+    final pair = data['pair'];
+
+    if (pair is! Map) {
+      throw Exception(
+        'La respuesta no contiene la sincronización creada',
+      );
+    }
+
+    return Map<String, dynamic>.from(pair);
+  }
+
   Future<List<Map<String, dynamic>>> listDevices() async {
     final uri = Uri.parse('$baseUrl/api/v1/devices');
 
