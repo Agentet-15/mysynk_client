@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'app_identity.dart';
@@ -6,6 +7,7 @@ import 'mysynk_api.dart';
 import 'server_config.dart';
 import 'files_page.dart';
 import 'sync_pair.dart';
+import 'sync/local_scanner.dart';
 import 'pairing_page.dart';
 
 void main() {
@@ -359,13 +361,14 @@ class _SyncPageState extends State<_SyncPage> {
   void initState() {
     super.initState();
     _loadPairs();
+    _testLocalAccess();
   }
 
   Future<void> _loadPairs() async {
     final preferences = await SharedPreferences.getInstance();
     final storedPairs = preferences.getStringList(_storageKey) ?? [];
 
-    final loadedPairs = <SyncPair>[];
+    final localPairs = <SyncPair>[];
 
     for (final value in storedPairs) {
       final parts = value.split('|');
@@ -374,7 +377,7 @@ class _SyncPageState extends State<_SyncPage> {
         continue;
       }
 
-      loadedPairs.add(
+      localPairs.add(
         SyncPair(
           id: parts[0],
           localPath: parts[1],
@@ -385,6 +388,104 @@ class _SyncPageState extends State<_SyncPage> {
       );
     }
 
+    final deviceId = preferences.getString('mysynk_device_id');
+    final serverUrl = await ServerConfig.getServerUrl();
+
+    var finalPairs = <SyncPair>[];
+
+    if (deviceId != null &&
+        deviceId.trim().isNotEmpty &&
+        serverUrl != null &&
+        serverUrl.trim().isNotEmpty) {
+      try {
+        final api = MySynkApi(baseUrl: serverUrl);
+        final serverPairs = await api.listSyncPairs();
+
+        final currentDevicePairs = serverPairs.where((pair) {
+          return pair['deviceId'] == deviceId.trim();
+        }).toList();
+
+        final usedLocalPaths = <String>{};
+
+        for (final serverPair in currentDevicePairs) {
+          final serverPairId = serverPair['id'];
+          final localPath = serverPair['localPath'];
+          final devicePath = serverPair['devicePath'];
+          final mode = serverPair['mode'];
+          final serverEnabled = serverPair['enabled'] == true;
+
+          if (serverPairId is! String ||
+              serverPairId.trim().isEmpty ||
+              localPath is! String ||
+              localPath.trim().isEmpty ||
+              devicePath is! String ||
+              mode is! String) {
+            continue;
+          }
+
+          final normalizedLocalPath = localPath.trim();
+
+          // Evita que un mismo directorio aparezca dos veces
+          // aunque existan registros duplicados en el servidor.
+          if (!usedLocalPaths.add(normalizedLocalPath)) {
+            continue;
+          }
+
+          SyncPair? localPair;
+
+          for (final candidate in localPairs) {
+            if (candidate.localPath == normalizedLocalPath) {
+              localPair = candidate;
+              break;
+            }
+          }
+
+          final enabled = localPair?.enabled ?? serverEnabled;
+
+          finalPairs.add(
+            SyncPair(
+              id: serverPairId.trim(),
+              localPath: normalizedLocalPath,
+              devicePath: devicePath,
+              mode: mode,
+              enabled: enabled,
+            ),
+          );
+
+          if (localPair != null &&
+              localPair.enabled != serverEnabled) {
+            await api.updateSyncPair(
+              pairId: serverPairId.trim(),
+              changes: {
+                'enabled': localPair.enabled,
+              },
+            );
+          }
+        }
+
+        await preferences.setStringList(
+          _storageKey,
+          finalPairs
+              .map(
+                (pair) => [
+                  pair.id,
+                  pair.localPath,
+                  pair.devicePath,
+                  pair.mode,
+                  pair.enabled.toString(),
+                ].join('|'),
+              )
+              .toList(),
+        );
+      } catch (_) {
+        // Si el servidor no está disponible, mantenemos
+        // la configuración local existente.
+        finalPairs = localPairs;
+      }
+    } else {
+      finalPairs = localPairs;
+    }
+
     if (!mounted) {
       return;
     }
@@ -392,8 +493,33 @@ class _SyncPageState extends State<_SyncPage> {
     setState(() {
       _pairs
         ..clear()
-        ..addAll(loadedPairs);
+        ..addAll(finalPairs);
     });
+  }
+
+  Future<void> _testLocalAccess() async {
+    try {
+      final dir = Directory('/storage/emulated/0/DCIM/Camera');
+      var count = 0;
+
+      await for (final entity in dir.list(
+        recursive: false,
+        followLinks: false,
+      )) {
+        debugPrint(
+          'MYSYNK: ENTITY type=${entity.runtimeType} path=${entity.path}',
+        );
+        count++;
+
+        if (count >= 10) {
+          break;
+        }
+      }
+
+      debugPrint('MYSYNK: Directory.list encontró $count elementos');
+    } catch (error) {
+      debugPrint('MYSYNK: ERROR Directory.list - $error');
+    }
   }
 
   Future<void> _savePairs() async {
@@ -429,19 +555,186 @@ class _SyncPageState extends State<_SyncPage> {
       return;
     }
 
-    setState(() {
-      _pairs.add(
-        SyncPair(
-          id: DateTime.now().microsecondsSinceEpoch.toString(),
-          localPath: localPath,
-          devicePath: '/${localPath.split('/').last}',
-          mode: 'ONE_WAY_UPLOAD',
-          enabled: true,
+    final preferences = await SharedPreferences.getInstance();
+    final deviceId = preferences.getString('mysynk_device_id');
+
+    if (deviceId == null || deviceId.trim().isEmpty) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Este dispositivo todavía no está emparejado con MySynk.',
+          ),
         ),
       );
-    });
+      return;
+    }
 
-    await _savePairs();
+    final serverUrl = await ServerConfig.getServerUrl();
+
+    if (serverUrl == null || serverUrl.trim().isEmpty) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No hay un servidor MySynk configurado.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final api = MySynkApi(baseUrl: serverUrl);
+
+    final devicePath = '/${localPath.split('/').last}';
+
+    try {
+      final pair = await api.createSyncPair(
+        deviceId: deviceId.trim(),
+        localPath: localPath,
+        devicePath: devicePath,
+        mode: 'ONE_WAY_UPLOAD',
+      );
+
+      final pairId = pair['id'];
+
+      if (pairId is! String || pairId.trim().isEmpty) {
+        throw Exception(
+          'El servidor no devolvió el identificador de la sincronización.',
+        );
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _pairs.add(
+          SyncPair(
+            id: pairId.trim(),
+            localPath: localPath,
+            devicePath: devicePath,
+            mode: 'ONE_WAY_UPLOAD',
+            enabled: true,
+          ),
+        );
+      });
+
+      await _savePairs();
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Carpeta sincronizada agregada.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No se pudo agregar la carpeta: $error',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _removePair(int index, SyncPair pair) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Eliminar de sincronización'),
+          content: Text(
+            '¿Quieres quitar "${pair.localPath}" de la sincronización?\n\n'
+            'La carpeta del teléfono y los archivos que ya estén respaldados '
+            'en el servidor no se eliminarán.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Eliminar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    final serverUrl = await ServerConfig.getServerUrl();
+
+    if (serverUrl == null || serverUrl.trim().isEmpty) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No hay un servidor MySynk configurado.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final api = MySynkApi(baseUrl: serverUrl);
+
+    try {
+      await api.deleteSyncPair(pair.id);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _pairs.removeAt(index);
+      });
+
+      await _savePairs();
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Carpeta eliminada de la sincronización.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No se pudo eliminar la sincronización: $error',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _setPairEnabled(
@@ -449,17 +742,61 @@ class _SyncPageState extends State<_SyncPage> {
     SyncPair pair,
     bool value,
   ) async {
-    setState(() {
-      _pairs[index] = SyncPair(
-        id: pair.id,
-        localPath: pair.localPath,
-        devicePath: pair.devicePath,
-        mode: pair.mode,
-        enabled: value,
-      );
-    });
+    final serverUrl = await ServerConfig.getServerUrl();
 
-    await _savePairs();
+    if (serverUrl == null || serverUrl.trim().isEmpty) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No hay un servidor MySynk configurado.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final api = MySynkApi(baseUrl: serverUrl);
+
+    try {
+      await api.updateSyncPair(
+        pairId: pair.id,
+        changes: {
+          'enabled': value,
+        },
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _pairs[index] = SyncPair(
+          id: pair.id,
+          localPath: pair.localPath,
+          devicePath: pair.devicePath,
+          mode: pair.mode,
+          enabled: value,
+        );
+      });
+
+      await _savePairs();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No se pudo actualizar la sincronización: $error',
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -507,10 +844,21 @@ class _SyncPageState extends State<_SyncPage> {
                       subtitle: Text(
                         '${pair.localPath} → ${pair.devicePath}',
                       ),
-                      trailing: Switch(
-                        value: pair.enabled,
-                        onChanged: (value) =>
-                            _setPairEnabled(index, pair, value),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Switch(
+                            value: pair.enabled,
+                            onChanged: (value) =>
+                                _setPairEnabled(index, pair, value),
+                          ),
+                          IconButton(
+                            tooltip: 'Eliminar de sincronización',
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () =>
+                                _removePair(index, pair),
+                          ),
+                        ],
                       ),
                     ),
                   );

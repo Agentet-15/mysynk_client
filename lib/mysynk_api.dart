@@ -163,6 +163,51 @@ class MySynkApi {
     return Map<String, dynamic>.from(pair);
   }
 
+  Future<Map<String, dynamic>> updateSyncPair({
+    required String pairId,
+    required Map<String, dynamic> changes,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/sync/$pairId');
+
+    final response = await http.patch(
+      uri,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(changes),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('No se pudo actualizar la sincronización');
+    }
+
+    final data = jsonDecode(response.body);
+
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Respuesta inválida del servidor');
+    }
+
+    final pair = data['pair'];
+
+    if (pair is! Map) {
+      throw Exception(
+        'La respuesta no contiene la sincronización actualizada',
+      );
+    }
+
+    return Map<String, dynamic>.from(pair);
+  }
+
+  Future<void> deleteSyncPair(String pairId) async {
+    final uri = Uri.parse('$baseUrl/api/v1/sync/$pairId');
+
+    final response = await http.delete(uri);
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('No se pudo eliminar la sincronización');
+    }
+  }
+
   Future<List<Map<String, dynamic>>> listDevices() async {
     final uri = Uri.parse('$baseUrl/api/v1/devices');
 

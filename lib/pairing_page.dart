@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'device_identity.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -69,19 +70,39 @@ class _PairingPageState extends State<PairingPage> {
       debugPrint('MYSYNK: iniciando conexión...');
       final androidId = await DeviceIdentity.getAndroidId();
       debugPrint('MYSYNK: ANDROID_ID obtenido');
+      debugPrint('MYSYNK: androidId = $androidId');
 
       final api = MySynkApi(
         baseUrl: pairing.url,
       );
 
-      await api.authorizePairing(
+      debugPrint('MYSYNK: enviando autorización de pairing...');
+      final pairingResult = await api.authorizePairing(
         token: pairing.pairing,
         name: 'Mi dispositivo Android',
         type: 'android',
         platformIdentifier: androidId,
       );
 
+      debugPrint('MYSYNK: pairingResult = $pairingResult');
+      final device = pairingResult['device'];
+      final deviceId =
+          device is Map ? device['id'] : null;
+
+      if (deviceId is! String || deviceId.trim().isEmpty) {
+        throw Exception(
+          'El servidor no devolvió el identificador del dispositivo',
+        );
+      }
+
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(
+        'mysynk_device_id',
+        deviceId.trim(),
+      );
+
       debugPrint('MYSYNK: pairing enviado al servidor');
+      debugPrint('MYSYNK: deviceId guardado');
 
       await ServerConfig.setServerUrl(pairing.url);
 
