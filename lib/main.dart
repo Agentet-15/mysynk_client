@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'app_identity.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'mysynk_api.dart';
 import 'server_config.dart';
 import 'files_page.dart';
+import 'sync_pair.dart';
 import 'pairing_page.dart';
 
 void main() {
@@ -341,28 +343,180 @@ class _SpacePageState extends State<_SpacePage> {
   }
 }
 
-class _SyncPage extends StatelessWidget {
+class _SyncPage extends StatefulWidget {
   const _SyncPage();
 
   @override
+  State<_SyncPage> createState() => _SyncPageState();
+}
+
+class _SyncPageState extends State<_SyncPage> {
+  static const String _storageKey = 'mysynk_sync_pairs';
+
+  final List<SyncPair> _pairs = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPairs();
+  }
+
+  Future<void> _loadPairs() async {
+    final preferences = await SharedPreferences.getInstance();
+    final storedPairs = preferences.getStringList(_storageKey) ?? [];
+
+    final loadedPairs = <SyncPair>[];
+
+    for (final value in storedPairs) {
+      final parts = value.split('|');
+
+      if (parts.length != 5) {
+        continue;
+      }
+
+      loadedPairs.add(
+        SyncPair(
+          id: parts[0],
+          localPath: parts[1],
+          devicePath: parts[2],
+          mode: parts[3],
+          enabled: parts[4] == 'true',
+        ),
+      );
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _pairs
+        ..clear()
+        ..addAll(loadedPairs);
+    });
+  }
+
+  Future<void> _savePairs() async {
+    final preferences = await SharedPreferences.getInstance();
+
+    final values = _pairs
+        .map(
+          (pair) => [
+            pair.id,
+            pair.localPath,
+            pair.devicePath,
+            pair.mode,
+            pair.enabled.toString(),
+          ].join('|'),
+        )
+        .toList();
+
+    await preferences.setStringList(_storageKey, values);
+  }
+
+  Future<void> _addFolder() async {
+    final selectedDirectory =
+        await FilePicker.getDirectoryPath();
+
+    if (selectedDirectory == null ||
+        selectedDirectory.trim().isEmpty) {
+      return;
+    }
+
+    final localPath = selectedDirectory.trim();
+
+    if (_pairs.any((pair) => pair.localPath == localPath)) {
+      return;
+    }
+
+    setState(() {
+      _pairs.add(
+        SyncPair(
+          id: DateTime.now().microsecondsSinceEpoch.toString(),
+          localPath: localPath,
+          devicePath: '/${localPath.split('/').last}',
+          mode: 'ONE_WAY_UPLOAD',
+          enabled: true,
+        ),
+      );
+    });
+
+    await _savePairs();
+  }
+
+  Future<void> _setPairEnabled(
+    int index,
+    SyncPair pair,
+    bool value,
+  ) async {
+    setState(() {
+      _pairs[index] = SyncPair(
+        id: pair.id,
+        localPath: pair.localPath,
+        devicePath: pair.devicePath,
+        mode: pair.mode,
+        enabled: value,
+      );
+    });
+
+    await _savePairs();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Center(
+    return Padding(
+      padding: const EdgeInsets.all(16),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Icon(
-            Icons.sync,
-            size: 64,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Sincronización',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+              ),
+              FilledButton.icon(
+                onPressed: _addFolder,
+                icon: const Icon(Icons.add),
+                label: const Text('Agregar carpeta'),
+              ),
+            ],
           ),
-          const SizedBox(height: 20),
-          Text(
-            'Sincronización',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Aquí aparecerá el estado de tus sincronizaciones.',
-          ),
+          const SizedBox(height: 16),
+          if (_pairs.isEmpty)
+            const Expanded(
+              child: Center(
+                child: Text(
+                  'Todavía no tienes carpetas sincronizadas.',
+                ),
+              ),
+            )
+          else
+            Expanded(
+              child: ListView.builder(
+                itemCount: _pairs.length,
+                itemBuilder: (context, index) {
+                  final pair = _pairs[index];
+
+                  return Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.folder),
+                      title: Text(pair.localPath),
+                      subtitle: Text(
+                        '${pair.localPath} → ${pair.devicePath}',
+                      ),
+                      trailing: Switch(
+                        value: pair.enabled,
+                        onChanged: (value) =>
+                            _setPairEnabled(index, pair, value),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
         ],
       ),
     );
