@@ -47,3 +47,8 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Necesario para DocumentFile en el selector de carpetas SAF.
+    implementation("androidx.documentfile:documentfile:1.0.1")
+}
