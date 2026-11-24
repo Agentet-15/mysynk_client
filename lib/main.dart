@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'app_identity.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'device_auth.dart';
 import 'mysynk_api.dart';
 import 'server_config.dart';
 import 'files_page.dart';
 import 'sync_pair.dart';
 import 'sync/local_scanner.dart';
+import 'sync/sync_engine.dart';
 import 'pairing_page.dart';
 
 void main() {
@@ -356,6 +358,7 @@ class _SyncPageState extends State<_SyncPage> {
   static const String _storageKey = 'mysynk_sync_pairs';
 
   final List<SyncPair> _pairs = [];
+  String? _syncingPairId;
 
   @override
   void initState() {
@@ -555,8 +558,7 @@ class _SyncPageState extends State<_SyncPage> {
       return;
     }
 
-    final preferences = await SharedPreferences.getInstance();
-    final deviceId = preferences.getString('mysynk_device_id');
+    final deviceId = await DeviceAuth.getDeviceId();
 
     if (deviceId == null || deviceId.trim().isEmpty) {
       if (!mounted) {
@@ -799,6 +801,92 @@ class _SyncPageState extends State<_SyncPage> {
     }
   }
 
+  Future<void> _syncPair(SyncPair pair) async {
+    if (_syncingPairId != null) {
+      return;
+    }
+
+    final token = await DeviceAuth.getAccessToken();
+    final serverUrl = await ServerConfig.getServerUrl();
+
+    if (token == null ||
+        serverUrl == null ||
+        serverUrl.trim().isEmpty) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Empareja el dispositivo de nuevo antes de sincronizar.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _syncingPairId = pair.id;
+    });
+
+    try {
+      final engine = SyncEngine(
+        api: MySynkApi(baseUrl: serverUrl),
+        scanner: LocalScanner(),
+      );
+
+      final result = await engine.run(
+        pairId: pair.id,
+        localPath: pair.localPath,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Sync ${result.status}: ↑${result.uploaded} '
+            '↓${result.downloaded} · borrados ${result.deletedRemote}/${result.deletedLocal}'
+            ' · conflictos ${result.conflicts} · errores ${result.errors}',
+          ),
+        ),
+      );
+    } on MySynkApiException catch (error) {
+      if (error.isDeviceRevoked || error.isTokenProblem) {
+        await DeviceAuth.clear();
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No se pudo sincronizar: $error',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _syncingPairId = null;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -851,6 +939,21 @@ class _SyncPageState extends State<_SyncPage> {
                             value: pair.enabled,
                             onChanged: (value) =>
                                 _setPairEnabled(index, pair, value),
+                          ),
+                          IconButton(
+                            tooltip: 'Sincronizar ahora',
+                            icon: _syncingPairId == pair.id
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.sync),
+                            onPressed: _syncingPairId == null
+                                ? () => _syncPair(pair)
+                                : null,
                           ),
                           IconButton(
                             tooltip: 'Eliminar de sincronización',
