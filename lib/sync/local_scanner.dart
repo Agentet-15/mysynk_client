@@ -1,6 +1,4 @@
-import 'dart:io';
-
-import 'package:crypto/crypto.dart';
+import 'local_fs.dart';
 
 /// Entrada del manifiesto enviado al servidor.
 ///
@@ -38,91 +36,36 @@ class LocalFileEntry {
   }
 }
 
+/// Escanea la carpeta local y construye el manifiesto.
+///
+/// Funciona tanto con rutas reales como con carpetas SAF (`content://`).
 class LocalScanner {
+  const LocalScanner({this.fs});
+
+  final LocalFs? fs;
+
   Future<List<LocalFileEntry>> scan(String rootPath) async {
-    final root = Directory(rootPath);
+    final filesystem = fs ?? LocalFs.forPath(rootPath);
+    final entries = await filesystem.list(rootPath);
+    final manifest = <LocalFileEntry>[];
 
-    if (!await root.exists()) {
-      throw Exception('La carpeta local no existe: $rootPath');
-    }
+    for (final entry in entries) {
+      final hash = entry.type == 'directory'
+          ? ''
+          : await filesystem.hash(rootPath, entry.path);
 
-    final files = <LocalFileEntry>[];
-    final normalizedRoot = _normalize(root.path);
-
-    await for (final entity in root.list(
-      recursive: true,
-      followLinks: false,
-    )) {
-      final relativePath = _relativePath(
-        normalizedRoot,
-        _normalize(entity.path),
-      );
-
-      if (relativePath.isEmpty) {
-        continue;
-      }
-
-      if (entity is Directory) {
-        files.add(
-          LocalFileEntry(
-            path: relativePath,
-            size: 0,
-            modifiedAt: DateTime.fromMillisecondsSinceEpoch(0),
-            hash: '',
-            type: 'directory',
-          ),
-        );
-        continue;
-      }
-
-      if (entity is! File) {
-        continue;
-      }
-
-      try {
-        final stat = await entity.stat();
-
-        if (stat.type != FileSystemEntityType.file) {
-          continue;
-        }
-
-        final hash = await sha256.bind(entity.openRead()).first;
-
-        files.add(
-          LocalFileEntry(
-            path: relativePath,
-            size: stat.size,
-            modifiedAt: stat.modified,
-            hash: hash.toString(),
-          ),
-        );
-      } on FileSystemException {
-        // El archivo puede desaparecer mientras se escanea.
-        // Continuamos con los demás archivos.
-      }
-    }
-
-    files.sort((a, b) => a.path.compareTo(b.path));
-
-    return files;
-  }
-
-  String _normalize(String value) =>
-      value.replaceAll(r'\', '/').replaceFirst(RegExp(r'/$'), '');
-
-  String _relativePath(String root, String full) {
-    if (!full.startsWith(root)) {
-      throw Exception(
-        'El archivo $full no pertenece a la carpeta $root.',
+      manifest.add(
+        LocalFileEntry(
+          path: entry.path,
+          size: entry.size,
+          modifiedAt: entry.modified,
+          hash: hash,
+          type: entry.type,
+        ),
       );
     }
 
-    var relative = full.substring(root.length);
-
-    while (relative.startsWith('/')) {
-      relative = relative.substring(1);
-    }
-
-    return relative;
+    manifest.sort((a, b) => a.path.compareTo(b.path));
+    return manifest;
   }
 }

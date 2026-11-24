@@ -1,8 +1,9 @@
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
 import '../mysynk_api.dart';
+import 'local_fs.dart';
 import 'local_scanner.dart';
 
 class SyncEngineResult {
@@ -32,12 +33,15 @@ class SyncEngineResult {
 /// El servidor solo calcula el plan; el cliente escanea su carpeta,
 /// envía el manifiesto y ejecuta las acciones devueltas.
 class SyncEngine {
-  const SyncEngine({
+  SyncEngine({
     required this.api,
-    required this.scanner,
-  });
+    LocalFs? fs,
+    LocalScanner? scanner,
+  })  : _fs = fs,
+        scanner = scanner ?? LocalScanner(fs: fs);
 
   final MySynkApi api;
+  final LocalFs? _fs;
   final LocalScanner scanner;
 
   Future<SyncEngineResult> run({
@@ -45,6 +49,7 @@ class SyncEngine {
     required String localPath,
     String operation = 'SYNC',
   }) async {
+    final fs = _fs ?? LocalFs.forPath(localPath);
     final entries = await scanner.scan(localPath);
 
     final plan = await api.createSyncPlan(
@@ -93,19 +98,23 @@ class SyncEngine {
         try {
           switch (actionName) {
             case 'UPLOAD':
-              await _upload(
-                pairId: pairId,
-                localPath: localPath,
-                relativePath: relativePath,
-                type: action['type'],
-                entries: entries,
-              );
+              if (action['type'] == 'directory') {
+                await api.createSyncFolder(pairId, relativePath);
+              } else {
+                await api.uploadSyncFile(
+                  pairId,
+                  relativePath,
+                  await fs.read(localPath, relativePath),
+                  sha256: _hashFor(entries, relativePath),
+                );
+              }
               uploaded++;
               break;
 
             case 'DOWNLOAD':
               await _download(
                 pairId: pairId,
+                fs: fs,
                 localPath: localPath,
                 relativePath: relativePath,
                 type: action['type'],
@@ -120,7 +129,7 @@ class SyncEngine {
               break;
 
             case 'DELETE_LOCAL':
-              await _deleteLocal(
+              await fs.delete(
                 localPath,
                 relativePath,
                 isDirectory: action['type'] == 'directory',
@@ -211,53 +220,25 @@ class SyncEngine {
     );
   }
 
-  Future<void> _upload({
-    required String pairId,
-    required String localPath,
-    required String relativePath,
-    required Object? type,
-    required List<LocalFileEntry> entries,
-  }) async {
-    if (type == 'directory') {
-      await api.createSyncFolder(pairId, relativePath);
-      return;
-    }
-
-    LocalFileEntry? entry;
-
-    for (final item in entries) {
-      if (item.path == relativePath) {
-        entry = item;
-        break;
+  String? _hashFor(List<LocalFileEntry> entries, String path) {
+    for (final entry in entries) {
+      if (entry.path == path) {
+        return entry.hash;
       }
     }
-
-    if (entry == null) {
-      throw Exception('No se encontró el archivo local $relativePath');
-    }
-
-    final bytes = await _localFile(localPath, relativePath).readAsBytes();
-
-    await api.uploadSyncFile(
-      pairId,
-      relativePath,
-      bytes,
-      sha256: entry.hash,
-    );
+    return null;
   }
 
   Future<void> _download({
     required String pairId,
+    required LocalFs fs,
     required String localPath,
     required String relativePath,
     required Object? type,
     required String? runId,
   }) async {
     if (type == 'directory') {
-      final directory = Directory(
-        _localFile(localPath, relativePath).path,
-      );
-      await directory.create(recursive: true);
+      await fs.createDirectory(localPath, relativePath);
 
       if (runId != null) {
         await api.ackSyncAction(
@@ -276,9 +257,11 @@ class SyncEngine {
       relativePath,
     );
 
-    final file = _localFile(localPath, relativePath);
-    await file.parent.create(recursive: true);
-    await file.writeAsBytes(bytes, flush: true);
+    await fs.write(
+      localPath,
+      relativePath,
+      Uint8List.fromList(bytes),
+    );
 
     if (runId != null) {
       await api.ackSyncAction(
@@ -289,30 +272,5 @@ class SyncEngine {
         hash: sha256.convert(bytes).toString(),
       );
     }
-  }
-
-  Future<void> _deleteLocal(
-    String localPath,
-    String relativePath, {
-    bool isDirectory = false,
-  }) async {
-    final path = _localFile(localPath, relativePath).path;
-    final entity = isDirectory ? Directory(path) : File(path);
-
-    if (await entity.exists()) {
-      await entity.delete(recursive: true);
-    }
-  }
-
-  File _localFile(String localPath, String relativePath) {
-    final normalizedRoot = localPath
-        .replaceAll(r'\', '/')
-        .replaceFirst(RegExp(r'/$'), '');
-    final normalizedRelative = relativePath.replaceAll(
-      '/',
-      Platform.pathSeparator,
-    );
-
-    return File('$normalizedRoot${Platform.pathSeparator}$normalizedRelative');
   }
 }

@@ -1,13 +1,13 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
 import 'app_identity.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'device_auth.dart';
 import 'mysynk_api.dart';
+import 'saf_directory_picker.dart';
 import 'server_config.dart';
 import 'files_page.dart';
 import 'sync_pair.dart';
+import 'sync/local_fs.dart';
 import 'sync/local_scanner.dart';
 import 'sync/sync_engine.dart';
 import 'pairing_page.dart';
@@ -358,13 +358,128 @@ class _SyncPageState extends State<_SyncPage> {
   static const String _storageKey = 'mysynk_sync_pairs';
 
   final List<SyncPair> _pairs = [];
+  final List<Map<String, dynamic>> _devices = [];
   String? _syncingPairId;
+  bool _loadingDevices = true;
 
   @override
   void initState() {
     super.initState();
     _loadPairs();
-    _testLocalAccess();
+    _loadDevices();
+  }
+
+  Future<void> _loadDevices() async {
+    final serverUrl = await ServerConfig.getServerUrl();
+
+    if (serverUrl == null || serverUrl.trim().isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _loadingDevices = false);
+      return;
+    }
+
+    try {
+      final devices = await MySynkApi(baseUrl: serverUrl).listDevices();
+
+      if (!mounted) {
+        return;
+      }
+
+      final order = {
+        'ACTIVE': 0,
+        'PENDING': 1,
+        'ARCHIVED': 2,
+        'REVOKED': 3,
+      };
+
+      devices.sort((a, b) {
+        final aStatus = a['status'] as String? ?? '';
+        final bStatus = b['status'] as String? ?? '';
+        return (order[aStatus] ?? 9).compareTo(order[bStatus] ?? 9);
+      });
+
+      setState(() {
+        _devices
+          ..clear()
+          ..addAll(devices);
+        _loadingDevices = false;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _loadingDevices = false);
+    }
+  }
+
+  String _deviceStatus(String status) {
+    switch (status) {
+      case 'ACTIVE':
+        return 'Activo';
+      case 'PENDING':
+        return 'Pendiente';
+      case 'ARCHIVED':
+        return 'Archivado';
+      case 'REVOKED':
+        return 'Revocado';
+      default:
+        return status;
+    }
+  }
+
+  String _folderLabel(String localPath) {
+    if (!localPath.toLowerCase().startsWith('content://')) {
+      return localPath;
+    }
+
+    final uri = Uri.tryParse(localPath);
+    var label = (uri != null && uri.pathSegments.isNotEmpty)
+        ? uri.pathSegments.last
+        : localPath;
+
+    try {
+      label = Uri.decodeComponent(label);
+    } catch (_) {
+      // Se conserva el segmento original.
+    }
+
+    final colon = label.lastIndexOf(':');
+
+    if (colon >= 0 && colon < label.length - 1) {
+      label = label.substring(colon + 1);
+    }
+
+    return label.isEmpty ? 'Carpeta' : label;
+  }
+
+  String _lastSeen(Map<String, dynamic> device) {
+    final raw = device['lastSeenAt'];
+
+    if (raw is! String) {
+      return 'Sin contacto';
+    }
+
+    final parsed = DateTime.tryParse(raw);
+
+    if (parsed == null) {
+      return 'Sin contacto';
+    }
+
+    final minutes = DateTime.now().difference(parsed).inMinutes;
+
+    if (minutes < 1) {
+      return 'Ahora';
+    }
+
+    if (minutes < 60) {
+      return 'Hace $minutes min';
+    }
+
+    final local = parsed.toLocal();
+    return '${local.day}/${local.month} ${local.hour}:'
+        '${local.minute.toString().padLeft(2, '0')}';
   }
 
   Future<void> _loadPairs() async {
@@ -500,31 +615,6 @@ class _SyncPageState extends State<_SyncPage> {
     });
   }
 
-  Future<void> _testLocalAccess() async {
-    try {
-      final dir = Directory('/storage/emulated/0/DCIM/Camera');
-      var count = 0;
-
-      await for (final entity in dir.list(
-        recursive: false,
-        followLinks: false,
-      )) {
-        debugPrint(
-          'MYSYNK: ENTITY type=${entity.runtimeType} path=${entity.path}',
-        );
-        count++;
-
-        if (count >= 10) {
-          break;
-        }
-      }
-
-      debugPrint('MYSYNK: Directory.list encontró $count elementos');
-    } catch (error) {
-      debugPrint('MYSYNK: ERROR Directory.list - $error');
-    }
-  }
-
   Future<void> _savePairs() async {
     final preferences = await SharedPreferences.getInstance();
 
@@ -544,17 +634,46 @@ class _SyncPageState extends State<_SyncPage> {
   }
 
   Future<void> _addFolder() async {
-    final selectedDirectory =
-        await FilePicker.getDirectoryPath();
+    SafDirectory? selectedDirectory;
 
-    if (selectedDirectory == null ||
-        selectedDirectory.trim().isEmpty) {
+    try {
+      selectedDirectory =
+          await SafDirectoryPicker().pickDirectory();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No se pudo abrir el selector de carpetas: $error',
+          ),
+        ),
+      );
       return;
     }
 
-    final localPath = selectedDirectory.trim();
+    if (selectedDirectory == null ||
+        selectedDirectory.uri.trim().isEmpty) {
+      return;
+    }
+
+    final localPath = selectedDirectory.uri.trim();
+    final folderName = selectedDirectory.name.trim().isEmpty
+        ? 'Carpeta'
+        : selectedDirectory.name.trim();
 
     if (_pairs.any((pair) => pair.localPath == localPath)) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Esa carpeta ya está sincronizada.'),
+        ),
+      );
       return;
     }
 
@@ -594,7 +713,7 @@ class _SyncPageState extends State<_SyncPage> {
 
     final api = MySynkApi(baseUrl: serverUrl);
 
-    final devicePath = '/${localPath.split('/').last}';
+    final devicePath = '/$folderName';
 
     try {
       final pair = await api.createSyncPair(
@@ -831,9 +950,11 @@ class _SyncPageState extends State<_SyncPage> {
     });
 
     try {
+      final fs = LocalFs.forPath(pair.localPath);
       final engine = SyncEngine(
         api: MySynkApi(baseUrl: serverUrl),
-        scanner: LocalScanner(),
+        fs: fs,
+        scanner: LocalScanner(fs: fs),
       );
 
       final result = await engine.run(
@@ -910,6 +1031,84 @@ class _SyncPageState extends State<_SyncPage> {
             ],
           ),
           const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.devices_other),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Dispositivos',
+                        style:
+                            Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'Actualizar dispositivos',
+                        icon: const Icon(Icons.refresh),
+                        onPressed: _loadDevices,
+                      ),
+                    ],
+                  ),
+                  if (_loadingDevices)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Center(
+                        child: CircularProgressIndicator(),
+                      ),
+                    )
+                  else if (_devices.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        'No hay dispositivos emparejados.',
+                      ),
+                    )
+                  else
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(
+                        maxHeight: 170,
+                      ),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _devices.length,
+                        itemBuilder: (context, index) {
+                          final device = _devices[index];
+                          final status =
+                              device['status'] as String? ?? '';
+                          final name =
+                              device['name'] as String? ?? 'Dispositivo';
+                          final type =
+                              device['type'] as String? ?? '';
+
+                          return ListTile(
+                            dense: true,
+                            leading: Icon(
+                              status == 'ACTIVE'
+                                  ? Icons.check_circle
+                                  : Icons.devices,
+                              color: status == 'ACTIVE'
+                                  ? Colors.green
+                                  : null,
+                            ),
+                            title: Text(name),
+                            subtitle: Text(
+                              '${_deviceStatus(status)} · '
+                              '${_lastSeen(device)} · $type',
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
           if (_pairs.isEmpty)
             const Expanded(
               child: Center(
@@ -928,9 +1127,9 @@ class _SyncPageState extends State<_SyncPage> {
                   return Card(
                     child: ListTile(
                       leading: const Icon(Icons.folder),
-                      title: Text(pair.localPath),
+                      title: Text(_folderLabel(pair.localPath)),
                       subtitle: Text(
-                        '${pair.localPath} → ${pair.devicePath}',
+                        '${pair.devicePath} · ${pair.mode}',
                       ),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
