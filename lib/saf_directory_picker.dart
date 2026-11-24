@@ -11,8 +11,9 @@ class SafDirectory {
 }
 
 class SafDirectoryPicker {
+  // Debe coincidir con SAF_CHANNEL en MainActivity.kt.
   static const MethodChannel _channel =
-      MethodChannel('com.mysynk/saf');
+      MethodChannel('com.example.mysynk/saf');
 
   Future<SafDirectory?> pickDirectory() async {
     final result = await _channel.invokeMethod<Map<Object?, Object?>>(

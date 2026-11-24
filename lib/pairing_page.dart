@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import 'device_auth.dart';
 import 'device_identity.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
@@ -84,7 +84,6 @@ class _PairingPageState extends State<PairingPage> {
         platformIdentifier: androidId,
       );
 
-      debugPrint('MYSYNK: pairingResult = $pairingResult');
       final device = pairingResult['device'];
       final deviceId =
           device is Map ? device['id'] : null;
@@ -95,14 +94,22 @@ class _PairingPageState extends State<PairingPage> {
         );
       }
 
-      final preferences = await SharedPreferences.getInstance();
-      await preferences.setString(
-        'mysynk_device_id',
-        deviceId.trim(),
+      final accessToken = pairingResult['accessToken'];
+
+      if (accessToken is! String ||
+          !DeviceAuth.isValidToken(accessToken)) {
+        throw Exception(
+          'El servidor no devolvió un token de dispositivo válido. '
+          'Vuelve a generar el QR e inténtalo de nuevo.',
+        );
+      }
+
+      await DeviceAuth.save(
+        deviceId: deviceId.trim(),
+        accessToken: accessToken.trim(),
       );
 
-      debugPrint('MYSYNK: pairing enviado al servidor');
-      debugPrint('MYSYNK: deviceId guardado');
+      debugPrint('MYSYNK: pairing completado y token guardado');
 
       await ServerConfig.setServerUrl(pairing.url);
 
