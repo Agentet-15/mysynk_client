@@ -40,9 +40,12 @@ class SafDirectoryPicker {
         'primary%3A$encoded';
   }
 
-  Future<SafDirectory?> pickDirectory() async {
+  /// Abre el explorador de Android. Si se indica [initialUri], el
+  /// explorador se abre directamente en esa carpeta.
+  Future<SafDirectory?> pickDirectory({String? initialUri}) async {
     final result = await channel.invokeMethod<Map<Object?, Object?>>(
       'pickDirectory',
+      {'initialUri': initialUri},
     );
 
     if (result == null) {

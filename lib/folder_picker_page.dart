@@ -63,27 +63,41 @@ class _FolderPickerPageState extends State<FolderPickerPage> {
 
     setState(() => _checking = true);
 
-    final available = await SafDirectoryPicker.checkDirectory(uri);
+    try {
+      // El explorador de Android concede el permiso persistente cuando
+      // el usuario confirma «Usar esta carpeta».
+      final directory = await SafDirectoryPicker()
+          .pickDirectory(initialUri: uri);
 
-    if (!mounted) {
-      return;
-    }
+      if (!mounted) {
+        return;
+      }
 
-    setState(() => _checking = false);
+      if (directory == null) {
+        return;
+      }
 
-    if (!available) {
+      final chosenUri = directory.uri.trim();
+      final name = directory.name.trim().isEmpty
+          ? label
+          : directory.name.trim();
+
+      if (chosenUri.isNotEmpty && !_isSelected(chosenUri)) {
+        setState(
+          () => _selected.add(
+            FolderChoice(uri: chosenUri, name: name),
+          ),
+        );
+      }
+    } catch (error) {
       _showMessage(
-        'Android no permite acceder a "$label". '
-        'Usa «Elegir otra carpeta».',
+        'No se pudo abrir "$label" en el explorador: $error',
       );
-      return;
+    } finally {
+      if (mounted) {
+        setState(() => _checking = false);
+      }
     }
-
-    setState(
-      () => _selected.add(
-        FolderChoice(uri: uri, name: label),
-      ),
-    );
   }
 
   Future<void> _pickOtherFolder() async {

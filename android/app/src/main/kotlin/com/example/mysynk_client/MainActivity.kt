@@ -3,6 +3,7 @@ package com.example.mysynk_client
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.Settings
 import androidx.documentfile.provider.DocumentFile
 import io.flutter.embedding.android.FlutterActivity
@@ -83,7 +84,10 @@ class MainActivity : FlutterActivity() {
             SAF_CHANNEL,
         ).setMethodCallHandler { call, result ->
             when (call.method) {
-                PICK_DIRECTORY -> pickDirectory(result)
+                PICK_DIRECTORY -> pickDirectory(
+                    result,
+                    call.argument("initialUri"),
+                )
 
                 CHECK_DIRECTORY -> withRoot(
                     call.argument("root"),
@@ -267,13 +271,32 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun pickDirectory(result: MethodChannel.Result) {
+    private fun pickDirectory(
+        result: MethodChannel.Result,
+        initialUri: String?,
+    ) {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addFlags(
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or
                     Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
                     Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
             )
+
+            // El explorador de Android abre directamente en la carpeta
+            // sugerida y el usuario confirma con «Usar esta carpeta».
+            if (
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                !initialUri.isNullOrBlank()
+            ) {
+                val documentUri = Uri.parse(initialUri)
+                    .toString()
+                    .replace("/tree/", "/document/")
+
+                putExtra(
+                    DocumentsContract.EXTRA_INITIAL_URI,
+                    Uri.parse(documentUri),
+                )
+            }
         }
 
         pendingSafResult = result
