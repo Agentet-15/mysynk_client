@@ -1026,6 +1026,89 @@ class _SyncPageState extends State<_SyncPage> {
     }
   }
 
+  /// Estructura informativa de una carpeta, para ver cuánto hay
+  /// que cargar antes de decidir.
+  Future<Map<String, dynamic>> _pairInfo(MySynkApi api, SyncPair pair) async {
+    var localFiles = 0;
+    var localDirs = 0;
+
+    try {
+      final fs = LocalFs.forPath(pair.localPath);
+      final entries = await LocalScanner(fs: fs).scan(pair.localPath);
+      localFiles = entries.where((e) => e.type == 'file').length;
+      localDirs = entries.where((e) => e.type == 'directory').length;
+    } catch (error) {
+      localFiles = 0;
+      localDirs = 0;
+    }
+
+    var remoteFiles = 0;
+
+    try {
+      final status = await api.getSyncStatus(pair.id);
+      final count = status['fileCount'];
+      if (count is int) remoteFiles = count;
+    } catch (_) {
+      remoteFiles = 0;
+    }
+
+    return {
+      'localFiles': localFiles,
+      'localDirs': localDirs,
+      'remoteFiles': remoteFiles,
+    };
+  }
+
+  Future<void> _showPairInfo(SyncPair pair) async {
+    final serverUrl = await ServerConfig.getServerUrl();
+
+    if (serverUrl == null || serverUrl.trim().isEmpty) {
+      return;
+    }
+
+    final api = MySynkApi(baseUrl: serverUrl);
+    final info = await _pairInfo(api, pair);
+
+    if (!mounted) {
+      return;
+    }
+
+    showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Información de la carpeta'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Carpeta: ${_folderLabel(pair.localPath)}'),
+              Text('Ruta en el servidor: ${pair.devicePath}'),
+              const SizedBox(height: 8),
+              Text('Archivos locales: ${info['localFiles']}'),
+              Text('Carpetas locales: ${info['localDirs']}'),
+              Text('Archivos en el servidor: ${info['remoteFiles']}'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cerrar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Volver a sincronizar'),
+            ),
+          ],
+        );
+      },
+    ).then((result) {
+      if (result == true) {
+        _syncPair(pair);
+      }
+    });
+  }
+
   Future<void> _syncPair(SyncPair pair) async {
     if (_syncingPairId != null) {
       return;
@@ -1259,6 +1342,11 @@ class _SyncPageState extends State<_SyncPage> {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          IconButton(
+                            tooltip: 'Información',
+                            icon: const Icon(Icons.info_outline),
+                            onPressed: () => _showPairInfo(pair),
+                          ),
                           Switch(
                             value: pair.enabled,
                             onChanged: (value) =>
