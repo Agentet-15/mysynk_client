@@ -15,6 +15,31 @@ class SafDirectoryPicker {
   static const MethodChannel channel =
       MethodChannel('com.example.mysynk/saf');
 
+  /// Comprueba que Android todavía permite acceder a la carpeta.
+  static Future<bool> checkDirectory(String uri) async {
+    try {
+      final value = await channel.invokeMethod<bool>(
+        'checkDirectory',
+        {'root': uri},
+      );
+      return value == true;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// Construye la URI SAF de una carpeta conocida del almacenamiento
+  /// interno, por ejemplo `DCIM/Camera`.
+  static String uriForInternalFolder(String relativePath) {
+    final encoded = Uri.encodeComponent(
+      relativePath.replaceAll(r'\', '/').replaceAll(RegExp(r'^/+'), ''),
+    );
+    return 'content://com.android.externalstorage.documents/tree/'
+        'primary%3A$encoded';
+  }
+
   Future<SafDirectory?> pickDirectory() async {
     final result = await channel.invokeMethod<Map<Object?, Object?>>(
       'pickDirectory',

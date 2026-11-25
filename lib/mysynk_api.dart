@@ -218,6 +218,33 @@ class MySynkApi {
     return _decodeMap(response, 'No se pudo validar el dispositivo');
   }
 
+  /// Cambia el nombre con el que este dispositivo aparece en el servidor.
+  Future<Map<String, dynamic>> updateDeviceName(String name) async {
+    final uri = Uri.parse('$_root/api/v1/devices/me');
+
+    final response = await http.patch(
+      uri,
+      headers: await _headers(json: true, auth: true),
+      body: jsonEncode({'name': name}),
+    );
+
+    final data = _decodeMap(
+      response,
+      'No se pudo cambiar el nombre del dispositivo',
+    );
+    final device = data['device'];
+
+    if (device is! Map<String, dynamic>) {
+      throw MySynkApiException(
+        statusCode: response.statusCode,
+        code: 'INVALID_RESPONSE',
+        message: 'El servidor no devolvió el dispositivo actualizado.',
+      );
+    }
+
+    return device;
+  }
+
   Future<List<Map<String, dynamic>>> listDevices() async {
     final uri = Uri.parse('$_root/api/v1/devices');
 

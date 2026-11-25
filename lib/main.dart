@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'app_identity.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'device_auth.dart';
+import 'device_info.dart';
+import 'folder_picker_page.dart';
 import 'mysynk_api.dart';
-import 'saf_directory_picker.dart';
 import 'server_config.dart';
 import 'files_page.dart';
 import 'sync_pair.dart';
@@ -633,47 +634,48 @@ class _SyncPageState extends State<_SyncPage> {
     await preferences.setStringList(_storageKey, values);
   }
 
-  Future<void> _addFolder() async {
-    SafDirectory? selectedDirectory;
+  /// Nombre legible del teléfono, usado como carpeta en el servidor.
+  Future<String> _backupDeviceName(MySynkApi api) async {
+    final stored = await DeviceAuth.getName();
+
+    if (stored != null && stored.trim().isNotEmpty) {
+      return DeviceAuth.normalizeDeviceName(stored);
+    }
 
     try {
-      selectedDirectory =
-          await SafDirectoryPicker().pickDirectory();
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
+      final response = await api.getDeviceMe();
+      final device = response['device'];
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'No se pudo abrir el selector de carpetas: $error',
-          ),
-        ),
-      );
-      return;
+      if (device is Map && device['name'] is String) {
+        final name =
+            DeviceAuth.normalizeDeviceName(device['name'] as String);
+
+        if (name.isNotEmpty) {
+          await DeviceAuth.saveName(name);
+          return name;
+        }
+      }
+    } catch (_) {
+      // Si el servidor no responde se usa el nombre de Android.
     }
 
-    if (selectedDirectory == null ||
-        selectedDirectory.uri.trim().isEmpty) {
-      return;
-    }
+    final label = await DeviceInfo.getLabel();
+    final fallback = DeviceAuth.normalizeDeviceName(
+      label ?? 'Mi teléfono',
+    );
 
-    final localPath = selectedDirectory.uri.trim();
-    final folderName = selectedDirectory.name.trim().isEmpty
-        ? 'Carpeta'
-        : selectedDirectory.name.trim();
+    return fallback.isEmpty ? 'Mi teléfono' : fallback;
+  }
 
-    if (_pairs.any((pair) => pair.localPath == localPath)) {
-      if (!mounted) {
-        return;
-      }
+  Future<void> _addFolder() async {
+    final selected = await Navigator.of(context)
+        .push<List<FolderChoice>>(
+      MaterialPageRoute<List<FolderChoice>>(
+        builder: (_) => const FolderPickerPage(),
+      ),
+    );
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Esa carpeta ya está sincronizada.'),
-        ),
-      );
+    if (selected == null || selected.isEmpty || !mounted) {
       return;
     }
 
@@ -712,61 +714,165 @@ class _SyncPageState extends State<_SyncPage> {
     }
 
     final api = MySynkApi(baseUrl: serverUrl);
+    final phoneName = await _backupDeviceName(api);
 
-    final devicePath = '/$folderName';
+    final toCreate = <FolderChoice>[];
+    final usedNames = <String>{};
 
-    try {
-      final pair = await api.createSyncPair(
-        deviceId: deviceId.trim(),
-        localPath: localPath,
-        devicePath: devicePath,
-        mode: 'ONE_WAY_UPLOAD',
+    for (final folder in selected) {
+      final localPath = folder.uri.trim();
+
+      if (localPath.isEmpty ||
+          _pairs.any((pair) => pair.localPath == localPath)) {
+        continue;
+      }
+
+      var folderName =
+          DeviceAuth.normalizeDeviceName(folder.name);
+
+      if (folderName.isEmpty) {
+        folderName = 'Carpeta';
+      }
+
+      var uniqueName = folderName;
+      var suffix = 2;
+
+      while (!usedNames.add(uniqueName.toLowerCase())) {
+        uniqueName = '$folderName ($suffix)';
+        suffix++;
+      }
+
+      toCreate.add(
+        FolderChoice(uri: localPath, name: uniqueName),
       );
+    }
 
-      final pairId = pair['id'];
-
-      if (pairId is! String || pairId.trim().isEmpty) {
-        throw Exception(
-          'El servidor no devolvió el identificador de la sincronización.',
-        );
-      }
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _pairs.add(
-          SyncPair(
-            id: pairId.trim(),
-            localPath: localPath,
-            devicePath: devicePath,
-            mode: 'ONE_WAY_UPLOAD',
-            enabled: true,
-          ),
-        );
-      });
-
-      await _savePairs();
-
+    if (toCreate.isEmpty) {
       if (!mounted) {
         return;
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Carpeta sincronizada agregada.'),
+          content: Text(
+            'Todas las carpetas elegidas ya están sincronizadas.',
+          ),
         ),
       );
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
+      return;
+    }
 
+    if (!mounted) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Confirmar carpetas'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Teléfono: $phoneName',
+                  style:
+                      const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Se crearán estas carpetas en el servidor:',
+                ),
+                const SizedBox(height: 8),
+                for (final folder in toCreate)
+                  Text('• /$phoneName/${folder.name}'),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Sincronizar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    final created = <SyncPair>[];
+    final errors = <String>[];
+
+    for (final folder in toCreate) {
+      final safePhoneName =
+          DeviceAuth.normalizeDeviceName(phoneName);
+      final devicePath = '/$safePhoneName/${folder.name}';
+
+      try {
+        final pair = await api.createSyncPair(
+          deviceId: deviceId.trim(),
+          localPath: folder.uri,
+          devicePath: devicePath,
+          mode: 'ONE_WAY_UPLOAD',
+        );
+
+        final pairId = pair['id'];
+
+        if (pairId is! String || pairId.trim().isEmpty) {
+          throw Exception(
+            'El servidor no devolvió el identificador.',
+          );
+        }
+
+        created.add(
+          SyncPair(
+            id: pairId.trim(),
+            localPath: folder.uri,
+            devicePath: devicePath,
+            mode: 'ONE_WAY_UPLOAD',
+            enabled: true,
+          ),
+        );
+      } catch (error) {
+        errors.add('${folder.name}: $error');
+      }
+    }
+
+    if (created.isNotEmpty) {
+      setState(() {
+        _pairs.addAll(created);
+      });
+      await _savePairs();
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    if (errors.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'No se pudo agregar la carpeta: $error',
+            'Se agregaron ${created.length} carpeta(s) '
+            'de $phoneName.',
+          ),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Se agregaron ${created.length} carpeta(s). '
+            'Fallos: ${errors.join('; ')}',
           ),
         ),
       );
@@ -1110,10 +1216,29 @@ class _SyncPageState extends State<_SyncPage> {
           ),
           const SizedBox(height: 16),
           if (_pairs.isEmpty)
-            const Expanded(
+            Expanded(
               child: Center(
-                child: Text(
-                  'Todavía no tienes carpetas sincronizadas.',
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.folder_off_outlined,
+                      size: 48,
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Todavía no tienes carpetas sincronizadas.',
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Toca «Agregar carpeta» para elegir cuáles '
+                      'se sincronizan.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall,
+                    ),
+                  ],
                 ),
               ),
             )
@@ -1187,8 +1312,103 @@ class _SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<_SettingsPage> {
+  final TextEditingController _nameController =
+      TextEditingController();
   bool _testingConnection = false;
+  bool _savingName = false;
   String _connectionStatus = 'Todavía no conectado';
+  String _deviceName = 'Sin nombre';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDeviceName();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadDeviceName() async {
+    final stored = await DeviceAuth.getName();
+    var name = stored?.trim() ?? '';
+
+    if (name.isEmpty) {
+      name = await DeviceInfo.getLabel() ?? 'Mi teléfono';
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _deviceName = name;
+      _nameController.text = name;
+    });
+  }
+
+  Future<void> _saveDeviceName() async {
+    final name =
+        DeviceAuth.normalizeDeviceName(_nameController.text);
+
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Escribe un nombre para el teléfono.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _savingName = true);
+
+    final serverUrl = await ServerConfig.getServerUrl();
+
+    if (serverUrl != null && serverUrl.trim().isNotEmpty) {
+      try {
+        final device = await MySynkApi(baseUrl: serverUrl)
+            .updateDeviceName(name);
+        final remote = device['name'];
+
+        if (remote is String && remote.trim().isNotEmpty) {
+          await DeviceAuth.saveName(remote);
+        }
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+
+        setState(() => _savingName = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'No se pudo guardar el nombre en el servidor: $error',
+            ),
+          ),
+        );
+        return;
+      }
+    } else {
+      await DeviceAuth.saveName(name);
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _deviceName = name;
+      _savingName = false;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Nombre del teléfono guardado.'),
+      ),
+    );
+  }
 
   Future<void> _testConnection() async {
     setState(() {
@@ -1327,10 +1547,50 @@ class _SettingsPageState extends State<_SettingsPage> {
           ),
         ),
         const SizedBox(height: 20),
-        const ListTile(
-          leading: Icon(Icons.phone_android_outlined),
-          title: Text('Este dispositivo'),
-          subtitle: Text('Identidad del dispositivo pendiente'),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(
+                    Icons.phone_android_outlined,
+                  ),
+                  title: const Text('Nombre de este teléfono'),
+                  subtitle: Text(
+                    'Aparece en el servidor como /$_deviceName',
+                  ),
+                ),
+                TextField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Nombre del dispositivo',
+                    hintText: 'Ej. Motorola de Ana',
+                    border: OutlineInputBorder(),
+                  ),
+                  maxLength: 60,
+                  onSubmitted: (_) => _saveDeviceName(),
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.icon(
+                    onPressed: _savingName
+                        ? null
+                        : _saveDeviceName,
+                    icon: const Icon(Icons.save_outlined),
+                    label: Text(
+                      _savingName
+                          ? 'Guardando...'
+                          : 'Guardar nombre',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
         const ListTile(
           leading: Icon(Icons.info_outline),

@@ -2,6 +2,7 @@ package com.example.mysynk_client
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import androidx.documentfile.provider.DocumentFile
 import io.flutter.embedding.android.FlutterActivity
@@ -17,7 +18,9 @@ class MainActivity : FlutterActivity() {
         const val CHANNEL = "com.example.mysynk/device_identity"
         const val SAF_CHANNEL = "com.example.mysynk/saf"
         const val GET_ANDROID_ID = "getAndroidId"
+        const val GET_DEVICE_NAME = "getDeviceName"
         const val PICK_DIRECTORY = "pickDirectory"
+        const val CHECK_DIRECTORY = "checkDirectory"
         const val LIST_DIRECTORY = "listDirectory"
         const val READ_FILE = "readFile"
         const val HASH_FILE = "hashFile"
@@ -54,6 +57,23 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                GET_DEVICE_NAME -> {
+                    val manufacturer = Build.MANUFACTURER.trim()
+                    val model = Build.MODEL.trim()
+
+                    val label = if (
+                        model.startsWith(manufacturer, ignoreCase = true)
+                    ) {
+                        model
+                    } else {
+                        "$manufacturer $model"
+                    }
+
+                    result.success(
+                        label.replace(Regex("\\s+"), " ").trim(),
+                    )
+                }
+
                 else -> result.notImplemented()
             }
         }
@@ -64,6 +84,11 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 PICK_DIRECTORY -> pickDirectory(result)
+
+                CHECK_DIRECTORY -> withRoot(
+                    call.argument("root"),
+                    result,
+                ) { result.success(true) }
 
                 LIST_DIRECTORY -> withRoot(call.argument("root"), result) { tree ->
                     val entries = mutableListOf<Map<String, Any?>>()

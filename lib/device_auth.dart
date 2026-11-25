@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class DeviceAuth {
   static const String deviceIdKey = 'mysynk_device_id';
   static const String tokenKey = 'mysynk_device_token';
+  static const String nameKey = 'mysynk_device_name';
 
   static final RegExp _tokenPattern = RegExp(r'^[a-f0-9]{64}$');
 
@@ -37,9 +38,43 @@ class DeviceAuth {
     return value;
   }
 
+  /// Nombre legible del dispositivo, usado en la ruta de respaldo.
+  static Future<String?> getName() async {
+    final preferences = await SharedPreferences.getInstance();
+    final value = preferences.getString(nameKey)?.trim();
+
+    if (value == null || value.isEmpty) {
+      return null;
+    }
+
+    return value;
+  }
+
+  static Future<void> saveName(String name) async {
+    final normalized = normalizeDeviceName(name);
+
+    if (normalized.isEmpty) {
+      throw ArgumentError('El nombre del dispositivo está vacío.');
+    }
+
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(nameKey, normalized);
+  }
+
+  /// Normaliza un nombre para usarlo como segmento de ruta.
+  static String normalizeDeviceName(String value) {
+    final cleaned = value
+        .replaceAll(RegExp(r'[\\/:*?"<>|\r\n\t]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    return cleaned.length > 60 ? cleaned.substring(0, 60).trim() : cleaned;
+  }
+
   static Future<void> save({
     required String deviceId,
     required String accessToken,
+    String? name,
   }) async {
     final normalizedId = deviceId.trim();
     final normalizedToken = accessToken.trim();
@@ -56,6 +91,10 @@ class DeviceAuth {
 
     await preferences.setString(deviceIdKey, normalizedId);
     await preferences.setString(tokenKey, normalizedToken);
+
+    if (name != null && normalizeDeviceName(name).isNotEmpty) {
+      await preferences.setString(nameKey, normalizeDeviceName(name));
+    }
   }
 
   /// Llamar cuando el servidor responda `403 DEVICE_NOT_ACTIVE`.

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'device_auth.dart';
 import 'device_identity.dart';
+import 'device_info.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'mysynk_api.dart';
@@ -76,10 +77,12 @@ class _PairingPageState extends State<PairingPage> {
         baseUrl: pairing.url,
       );
 
+      final deviceLabel = await DeviceInfo.getLabel();
+
       debugPrint('MYSYNK: enviando autorización de pairing...');
       final pairingResult = await api.authorizePairing(
         token: pairing.pairing,
-        name: 'Mi dispositivo Android',
+        name: deviceLabel ?? 'Mi teléfono Android',
         type: 'android',
         platformIdentifier: androidId,
       );
@@ -104,9 +107,15 @@ class _PairingPageState extends State<PairingPage> {
         );
       }
 
+      final deviceName =
+          device is Map && device['name'] is String
+              ? device['name'] as String
+              : deviceLabel;
+
       await DeviceAuth.save(
         deviceId: deviceId.trim(),
         accessToken: accessToken.trim(),
+        name: deviceName,
       );
 
       debugPrint('MYSYNK: pairing completado y token guardado');
