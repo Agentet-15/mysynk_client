@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 
 import '../mysynk_api.dart';
 import 'local_fs.dart';
@@ -32,6 +33,23 @@ class SyncEngineResult {
 ///
 /// El servidor solo calcula el plan; el cliente escanea su carpeta,
 /// envía el manifiesto y ejecuta las acciones devueltas.
+/// Argumento para ejecutar el motor en un isolate de fondo.
+class SyncEngineJob {
+  const SyncEngineJob({
+    required this.engine,
+    required this.pairId,
+    required this.localPath,
+  });
+
+  final SyncEngine engine;
+  final String pairId;
+  final String localPath;
+}
+
+/// Acción global ejecutable por `compute`.
+Future<SyncEngineResult> runSyncEngine(SyncEngineJob job) => job.engine
+    .run(pairId: job.pairId, localPath: job.localPath);
+
 class SyncEngine {
   SyncEngine({
     required this.api,

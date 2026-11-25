@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'app_identity.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -1146,9 +1147,13 @@ class _SyncPageState extends State<_SyncPage> {
         scanner: LocalScanner(fs: fs),
       );
 
-      final result = await engine.run(
-        pairId: pair.id,
-        localPath: pair.localPath,
+      final result = await compute(
+        runSyncEngine,
+        SyncEngineJob(
+          engine: engine,
+          pairId: pair.id,
+          localPath: pair.localPath,
+        ),
       );
 
       if (!mounted) {

@@ -1,3 +1,7 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+
 import 'local_fs.dart';
 
 /// Entrada del manifiesto enviado al servidor.
@@ -47,25 +51,56 @@ class LocalScanner {
   Future<List<LocalFileEntry>> scan(String rootPath) async {
     final filesystem = fs ?? LocalFs.forPath(rootPath);
     final entries = await filesystem.list(rootPath);
-    final manifest = <LocalFileEntry>[];
 
-    for (final entry in entries) {
-      final hash = entry.type == 'directory'
-          ? ''
-          : await filesystem.hash(rootPath, entry.path);
+    // El manifiesto se calcula en un isolate de fondo: con carpetas
+    // grandes (WhatsApp de ~40 GB) generar hashes de cada archivo en el
+    // hilo de UI congelaría la app (ANR).
+    final args = _ScanArgs(
+      rootPath: rootPath,
+      filesystem: filesystem,
+      entries: entries,
+    );
 
-      manifest.add(
-        LocalFileEntry(
-          path: entry.path,
-          size: entry.size,
-          modifiedAt: entry.modified,
-          hash: hash,
-          type: entry.type,
-        ),
-      );
+    try {
+      return await compute(_buildManifest, args);
+    } on Object {
+      // Si ya estamos en un isolate de fondo se ejecuta directamente.
+      return _buildManifest(args);
     }
-
-    manifest.sort((a, b) => a.path.compareTo(b.path));
-    return manifest;
   }
+}
+
+class _ScanArgs {
+  const _ScanArgs({
+    required this.rootPath,
+    required this.filesystem,
+    required this.entries,
+  });
+
+  final String rootPath;
+  final LocalFs filesystem;
+  final List<LocalFsEntry> entries;
+}
+
+Future<List<LocalFileEntry>> _buildManifest(_ScanArgs args) async {
+  final manifest = <LocalFileEntry>[];
+
+  for (final entry in args.entries) {
+    final hash = entry.type == 'directory'
+        ? ''
+        : await args.filesystem.hash(args.rootPath, entry.path);
+
+    manifest.add(
+      LocalFileEntry(
+        path: entry.path,
+        size: entry.size,
+        modifiedAt: entry.modified,
+        hash: hash,
+        type: entry.type,
+      ),
+    );
+  }
+
+  manifest.sort((a, b) => a.path.compareTo(b.path));
+  return manifest;
 }
